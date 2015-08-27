@@ -82,7 +82,7 @@ function Ldp (rdf, store, options) {
       next = function defaultNext (err) {
 
         if (err) {
-          res.writeHead(err.status || err.statusCode);
+          res.statusCode = err.status || err.statusCode;
           return res.end(err.message || '');
         }
 
@@ -117,6 +117,8 @@ function Ldp (rdf, store, options) {
     }
   };
 
+  var defaultLink = ['<http://www.w3.org/ns/ldp#Resource>; rel="type"']
+
   self.get = function (req, res, next, iri, options) {
     var mimeType = self.serializers.find(req.headers.accept);
 
@@ -132,6 +134,12 @@ function Ldp (rdf, store, options) {
       self.serializers[mimeType](graph, function (data) {
         res.statusCode = 200; // OK
         res.setHeader('Content-Type', mimeType);
+
+        var link = getResourceType(graph)
+          .concat(defaultLink)
+          .join(', ')
+
+        res.setHeader('Link', link);
 
         if (options == null || !('skipBody' in options) || !options.skipBody) {
           res.write(data);
@@ -165,6 +173,13 @@ function Ldp (rdf, store, options) {
           }
 
           res.statusCode = 204; // No Content
+
+          var link = getResourceType(graph)
+            .concat(defaultLink)
+            .join(', ')
+
+          res.setHeader('Link', link);
+
           res.end();
           next();
         }, options);
@@ -195,6 +210,13 @@ function Ldp (rdf, store, options) {
           }
 
           res.statusCode = 204; // No Content
+
+          var link = getResourceType(graph)
+            .concat(defaultLink)
+            .join(', ')
+
+          res.setHeader('Link', link);
+
           res.end();
           next();
         }, options);
@@ -209,8 +231,23 @@ function Ldp (rdf, store, options) {
       }
 
       res.statusCode = 204; // No Content
+
+      var link = defaultLink
+        .join(', ')
+
+      res.setHeader('Link', link);
+
       res.end();
       next();
     }, options);
   };
+}
+
+function getResourceType(graph) {
+  return graph
+    .match('', 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type')
+    .toArray()
+    .map(function(type) {
+      return '<' + type.object.valueOf() + '>; rel="type"'
+    })
 }
