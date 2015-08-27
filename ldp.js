@@ -2,6 +2,9 @@ module.exports = Ldp;
 
 var mimeparse = require('mimeparse');
 
+var defaultLink = ['<http://www.w3.org/ns/ldp#Resource>; rel="type"']
+var defaultRDFSourceLink = ['<http://www.w3.org/ns/ldp#RDFSource>; rel="type"']
+
 function Ldp (rdf, store, options) {
   var self = this;
 
@@ -117,8 +120,6 @@ function Ldp (rdf, store, options) {
     }
   };
 
-  var defaultLink = ['<http://www.w3.org/ns/ldp#Resource>; rel="type"']
-
   self.get = function (req, res, next, iri, options) {
     var mimeType = self.serializers.find(req.headers.accept);
 
@@ -136,6 +137,7 @@ function Ldp (rdf, store, options) {
         res.setHeader('Content-Type', mimeType);
 
         var link = getResourceType(graph)
+          .concat(defaultRDFSourceLink)
           .concat(defaultLink)
           .join(', ')
 
@@ -175,6 +177,7 @@ function Ldp (rdf, store, options) {
           res.statusCode = 204; // No Content
 
           var link = getResourceType(graph)
+            .concat(defaultRDFSourceLink)
             .concat(defaultLink)
             .join(', ')
 
@@ -212,6 +215,7 @@ function Ldp (rdf, store, options) {
           res.statusCode = 204; // No Content
 
           var link = getResourceType(graph)
+            .concat(defaultRDFSourceLink)
             .concat(defaultLink)
             .join(', ')
 
@@ -233,6 +237,7 @@ function Ldp (rdf, store, options) {
       res.statusCode = 204; // No Content
 
       var link = defaultLink
+        .concat(defaultRDFSourceLink)
         .join(', ')
 
       res.setHeader('Link', link);
