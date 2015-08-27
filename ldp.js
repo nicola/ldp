@@ -129,6 +129,8 @@ function Ldp (rdf, store, options) {
 
     store.graph(iri, function (graph) {
       if (graph == null) {
+        // TODO if iri is a LDPR-NS it should be
+        // served statically with appropriate Content-type
         return self.error.notFound(req, res, next);
       }
 
