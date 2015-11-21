@@ -318,12 +318,14 @@ function Ldp (rdf, options) {
     })
   }
 
-  var postContainer = function(req, res, next, new_iri, options) {
-    self.graphStore.graph(iri, function(err, graph) {
+  var postContainer = function (req, res, next, iri, options) {
+    self.graphStore.graph(iri, function (err, graph) {
       if (!err && graph) {
         return self.error.badRequestError(req, res, next)
       }
-      self.graphStore.add(iri)
+      // TODO how?
+      // self.graphStore.add(iri)
+      return self.error.internalServerError(req, res, next)
     })
   }
 
