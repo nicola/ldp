@@ -2,9 +2,9 @@
 
 var assert = require('assert')
 var fs = require('fs-extended')
-var rdf = require('rdf-ext')()
+var rdf = require('rdf-ext')
 var request = require('superagent')
-var utils = require('rdf-test-utils')(rdf)
+var utils = require('rdf-test-utils')
 var Promise = require('bluebird')
 
 describe('ldp', function () {
