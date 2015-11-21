@@ -5,7 +5,11 @@ var mediaType = require('negotiator/lib/mediaType')
 var BlobStore = require('./blob-store')
 var parsers = require('rdf-mime-type-util').parsers
 var serializers = require('rdf-mime-type-util').serializers
+var parseLinkHeader = require('parse-link-header')
 var mime = require('mime')
+var uuid = require('uuid')
+var string = require('string')
+var url = require('url')
 
 function Ldp (rdf, options) {
   var self = this
@@ -49,6 +53,12 @@ function Ldp (rdf, options) {
   self.error.internalServerError = function (req, res, next) {
     var err = new Error('Internal Server Error')
     err.status = err.statusCode = 500
+    next(err)
+  }
+
+  self.error.badRequestError = function (req, res, next) {
+    var err = new Error('Bad Request')
+    err.status = err.statusCode = 400
     next(err)
   }
 
@@ -109,7 +119,7 @@ function Ldp (rdf, options) {
     } else if (req.method === 'PUT') {
       self.put(req, res, next, iri, {agent: agent, application: application})
     } else if (req.method === 'POST') {
-      self.put(req, res, next, iri, {agent: agent, application: application})
+      self.post(req, res, next, iri, {agent: agent, application: application})
     } else if (req.method === 'DELETE') {
       self.del(req, res, next, iri, {agent: agent, application: application})
     } else {
@@ -118,18 +128,13 @@ function Ldp (rdf, options) {
   }
 
   var getGraph = function (req, res, next, iri, options, graph) {
-    console.log("graph is ", iri, graph.length)
     var mimeType = self.serializers.accepts(req.headers.accept) || 'text/turtle'
 
-    console.log("mimeType", mimeType)
     if (!mimeType) {
-      console.log("no mimetype")
       self.error.notAcceptable(req, res, next)
     } else {
-      console.log("es mimetype")
       var serializer = self.serializers[mimeType]
       serializer.serialize(graph, function (err, data) {
-        console.log("serializing", err, data)
         res.statusCode = 200 // OK
         res.setHeader('Content-Type', mimeType)
 
@@ -144,16 +149,13 @@ function Ldp (rdf, options) {
   }
 
   var getBlob = function (req, res, next, iri, options) {
-    console.log("blob is ", iri)
     var stream = self.blobStore.createReadStream(iri)
 
     stream.on('error', function (error) {
-      console.log("getBlob", error)
       self.error.notFound(req, res, next)
     })
 
     if (!stream) {
-      console.log("getBlob - no strem")
       self.error.notFound(req, res, next)
     } else {
       var mimeType = mime.lookup(self.blobStore.iriToPath(iri))
@@ -163,9 +165,7 @@ function Ldp (rdf, options) {
   }
 
   self.get = function (req, res, next, iri, options) {
-    console.log("called")
     self.graphStore.graph(iri, function (err, graph) {
-      console.log("graphStore.graph", err, graph)
       if (graph) {
         getGraph(req, res, next, iri, options, graph)
       } else {
@@ -218,7 +218,7 @@ function Ldp (rdf, options) {
     })
 
     req.pipe(concatStream(function (data) {
-      self.parsers[mimeType](data.toString(), function (graph) {
+      self.parsers[mimeType].parse(data.toString(), function (err, graph) {
         if (graph == null) {
           return self.error.notAcceptable(req, res, next)
         }
@@ -246,6 +246,7 @@ function Ldp (rdf, options) {
     })
 
     stream.on('error', function (error) {
+
       self.internalServerError(req, res, next)
     })
 
@@ -254,11 +255,107 @@ function Ldp (rdf, options) {
 
   self.put = function (req, res, next, iri, options) {
     var mimeType = self.parsers.accepts(req.headers['content-type'])
-
     if (mimeType) {
       putGraph(req, res, next, iri, options, mimeType)
     } else {
       putBlob(req, res, next, iri, options)
+    }
+  }
+
+  var postGraph = function (req, res, next, iri, options, mimeType) {
+    self.graphStore.graph(iri, function (err, graph) {
+      // TODO check if err is null when iri not found
+      if (!err && graph) {
+        return self.error.badRequestError(req, res, next)
+      }
+
+      req.on('error', function (error) {
+        self.error.internalServerError(req, res, next)
+      })
+
+      req.pipe(concatStream(function (data) {
+        self.parsers[mimeType].parse(data.toString(), function (err, graph) {
+          if (graph == null) {
+            return self.error.notAcceptable(req, res, next)
+          }
+
+          self.graphStore.add(iri, graph, function (err, added) {
+            if (added == null) {
+              return self.error.conflict(req, res, next)
+            }
+
+            res.statusCode = 201 // Created
+            res.setHeader('Location', iri)
+            res.end()
+            next()
+          }, options)
+        }, iri)
+      }))
+    })
+  }
+
+  var postBlob = function (req, res, next, iri, options) {
+    self.blobStore.exists(iri, function (err, exists) {
+      if (err) {
+        return self.error.internalServerError(req, res, next)
+      }
+      if (exists) {
+        return self.error.badRequestError(req, res, next)
+      }
+      var stream = self.blobStore.createWriteStream(iri)
+      stream.on('finish', function () {
+        res.statusCode = 201 // Created
+        res.setHeader('Location', iri)
+        res.end()
+        next()
+      })
+
+      stream.on('error', function (error) {
+        self.internalServerError(req, res, next)
+      })
+
+      req.pipe(stream)
+    })
+  }
+
+  var postContainer = function(req, res, next, new_iri, options) {
+    self.graphStore.graph(iri, function(err, graph) {
+      if (!err && graph) {
+        return self.error.badRequestError(req, res, next)
+      }
+      self.graphStore.add(iri)
+    })
+  }
+
+  self.post = function (req, res, next, iri, options) {
+    var originalMimeType = mediaType(req.headers['content-type']).shift()
+    var mimeType = self.parsers.accepts(req.headers['content-type'])
+    var type = mimeType || originalMimeType
+    var ext = type ? mime.extension(type) : false
+
+    var slug = req.get('slug')
+    if (slug) {
+      if (ext && !string(slug).endsWith(ext)) {
+        slug = slug + '.' + ext
+      }
+    } else {
+      slug = uuid.v1()
+      if (ext) slug = slug + '.' + ext
+    }
+
+    var new_iri = url.resolve(iri, slug)
+
+    var links = parseLinkHeader(req.headers['link']) || []
+    var isContainer = Object.keys(links).some(function (rel) {
+      return links[rel].url === 'http://www.w3.org/ns/ldp#BasicContainer'
+    })
+
+    if (isContainer) {
+      postContainer(req, res, next, new_iri, options, mimeType)
+    } else if (mimeType) {
+      postGraph(req, res, next, new_iri, options, mimeType)
+    } else {
+      postBlob(req, res, next, new_iri, options)
     }
   }
 
@@ -268,15 +365,20 @@ function Ldp (rdf, options) {
         return self.error.notFound(req, res, next)
       }
 
-      res.statusCode = 204 // No Content
+      res.statusCode = 200
       res.end()
       next()
     }, options)
   }
 
   var deleteBlob = function (req, res, next, iri, options) {
-    self.blobStore.remove(iri).then(function () {
-      res.statusCode = 204 // No Content
+    self.blobStore.exists(iri).then(function (exists) {
+      if (exists) {
+        return true
+      }
+      return self.blobStore.remove(iri)
+    }).then(function (exists) {
+      res.statusCode = exists ? 204 : 404 // No Content
       res.end()
       next()
     }).catch(function (error) {

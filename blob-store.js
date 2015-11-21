@@ -17,11 +17,13 @@ BlobStore.prototype.iriToPath = function (iri) {
   return path.join(this.path, this.buildPath(parsed))
 }
 
-BlobStore.prototype.exists = function (iri) {
+BlobStore.prototype.exists = function (iri, callback) {
   var self = this
 
   return new Promise(function (resolve, reject) {
     self.store.exists({key: self.iriToPath(iri)}, function (error, exists) {
+      if (callback) callback(error, exists)
+
       if (error) {
         reject(error)
       } else {
